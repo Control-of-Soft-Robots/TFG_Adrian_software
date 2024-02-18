@@ -11,8 +11,8 @@ classdef Robot < handle
         realMode = 1;                       % 1 if working with the real robot
         deflatingTime = 1500;               % Default deflating time
         deflatingRatio = 2;                 % Relation between deflation and inflation time
-        maxAction = 200;
-        max_millis = 1000;
+        maxAction = 200;                    % Maximum action of each valve in each iteration of the control loop
+        max_millis = 1000;                  % Maximum pressure in each valve
         nValves = 9;                        % Number of valves
         nSensors = 3;                       % Number of sensors
         base = [0 0 0];                     % Position of the centre of the basis (in cameras'coordinates)
@@ -22,12 +22,10 @@ classdef Robot < handle
         voltages;                           % Voltages read using the INAs
         positions;                          % Positions read using the cameras
         serialData = '';                    % Data received using the serial port
-        matrix_tV;
-        max_min;
-        volts;
-        tol = 20;
-        net_pt;
-        net_vt;
+        max_min;                            % Upper and lower limits of the sensor's measurements
+        tol = 20;                           % Tolerance of the error in the control loop
+        net_pt;                             % Neuronal network with positions as inputs
+        net_vt;                             % Neuronal network with voltages as inputs
 
         % Geometric parameters
         geom;
@@ -102,10 +100,6 @@ classdef Robot < handle
             for i = length(p)
                 delete(p{i});
             end
-        end
-
-        function vol = getVoltages(this)
-            vol = this.voltages(:,end);
         end
 
         %% Connection to Arduino
@@ -375,6 +369,11 @@ classdef Robot < handle
         end
 
         function WriteSegmentMillis(this, millis)
+            % Robot.WriteSegmentMillis(millis) sends to one whole segment
+            % an array of times, specified in millis
+
+            % Values can be positive or negative
+
             for i = 0:2
                 this.WriteOneValveMillis(i,millis(i+1));
             end
@@ -393,6 +392,13 @@ classdef Robot < handle
 
         end
 
+        function vol = getVoltages(this)
+            % vol = Robot.getVoltages() returns the last measurement of the
+            % sensors
+
+            vol = this.voltages(:,end);
+        end
+
         function millis = GetMillis(this)
             % millis = GetMillis() returns a 1 x Robot.nValves array 
             % containing the volume of air sent to each valve.
@@ -407,38 +413,11 @@ classdef Robot < handle
         end
 
         function Measure(this)
-            % measurement = Robot.Measure() returns a Robot.nSensors x 1 array
-            % containing the voltages read by Arduino.
-            %
-            % The values of data are also stored in the last column of
-            % this.voltages array-
-            % 
-            % Measurement is done by time blocking. If no answer is given
-            % after 500ms, process is aborted.
+            % Robot.Measure() sends the order to the microcontroller to
+            % measure the sensors' values
             
             % Sending measure order
             writeline(this.serialDevice, "M");
-
-            % Reading
-%             t1 = datetime("now");
-%             t2 = t1;
-%             while this.serialType ~= 'M' && seconds(t2 - t1) < 5
-%             end
-%             while seconds(t2 - t1) < 0.5
-%                 a = this.serialType;
-%                 if this.serialType == 'M'
-%                     measurement = this.serialData;
-%                     break
-%                 end
-%                 t2 = datetime("now");
-%             end
-%             if seconds(t2 - t1) >= 0.5
-%                 disp("After 500ms, no measurement is available");
-%             end
-%             measurement = this.serialData;
-%             measurement = split(measurement);
-%             measurement = str2double(measurement);
-%             this.voltages(:,end+1) = measurement(2:1+this.nSensors);
         end
 
         function CallbackMeasurement(this)
@@ -481,6 +460,8 @@ classdef Robot < handle
 
         %% Sensor calibration
         function CalibrateSensor(this, nSensor)
+            % Robot.CalibrateSensor(nSensor) finds the maximum and the
+            % minimum values of the measurement of each sensor
 
             this.Measure
             for i = 1:100000000
@@ -498,6 +479,8 @@ classdef Robot < handle
         end
 
         function Calibrate(this)
+            % Robot.Calibrate() calibrate a whole segment using the method
+            % CalibrateSensor
 
             for k = 0:2
                 this.CalibrateSensor(k);
@@ -621,17 +604,31 @@ classdef Robot < handle
         end
 
         %% Neural Network
-        function perform = NN_trainning(this, pos, volt, capas)
+        function [perform_pt, perform_vt] = NN_training(this, pos, volt, tiempo, capas_pt, capas_vt)
+            % [perform_pt, perform_vt] = Robot.NN_training(pos, volt,
+            % tiempo, capas_pt, capas_vt) trains and creates the two
+            % required neuronal networks for the control system of the
+            % robot
+
             n = fix(0.95*length(pos));
 
-            this.net = feedforwardnet(capas);
-            this.net = train(this.net,pos(1:n,:)',volt(1:n,:)');
+            this.net_pt = feedforwardnet(capas_pt);
+            this.net_pt = train(this.net_pt,pos(1:n,:)',tiempo(1:n,:)');
 
-            out = this.net(pos(n+1:end,:)');
-            perform = perf(this.net,volt(n+1:end,:)',out);
+            out_pt = this.net_pt(pos(n+1:end,:)');
+            perform_pt = perf(this.net_pt,tiempo(n+1:end,:)',out_pt);
+
+            this.net_vt = feedforwardnet(capas_vt);
+            this.net_vt = train(this.net_vt,volt(1:n,:)',tiempo(1:n,:)');
+
+            out_vt = this.net_vt(volt(n+1:end,:)');
+            perform_vt = perf(this.net_vt,tiempo(n+1:end,:)',out_vt);
         end
 
         function NN_creation(this, network_pt, network_vt)
+            % Robot.NN_creation(network_pt, network_vt) creates and
+            % storages the already created neural networks
+
             this.net_pt = network_pt;
             this.net_vt = network_vt;
         end
@@ -639,6 +636,8 @@ classdef Robot < handle
 
         %% Control of a single segment
         function [pos_final, error_pos] = Move(this, x)
+            % [pos_final, error_pos] = Robot.Move(x) moves the robot to an
+            % specified point (x) in the workspace of the robot
             
             niter = 0;
             action = zeros(1,3);
@@ -682,6 +681,10 @@ classdef Robot < handle
         end
 
         function [pos_final, error_pos, pos_inter] = Move_debug(this, x)
+            % [pos_final, error_pos, pos_inter] = Robot.Move_debug(x) moves
+            % the to an specified point (x) in the workspace of the robot,
+            % but capturing every position in between the inicial point and 
+            % the final point
             
             niter = 0;
             action = zeros(1,3);

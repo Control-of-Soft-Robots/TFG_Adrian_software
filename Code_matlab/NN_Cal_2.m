@@ -1,25 +1,24 @@
-% MAX_MILLIS = 900;
-% N_ITER_MAX = 1300;
-% SAVE = 100;
-% RESET = 200;
+MAX_MILLIS = 900;
+N_ITER_MAX = 1050;
+SAVE = 100;
 
-% pos = zeros(N_ITER_MAX,3);
-% vol = zeros(N_ITER_MAX,3);
-% t = zeros(N_ITER_MAX,3);
-% 
-% R.Measure();
-% pause(0.1)
-%     
-% pos_raw = R.CapturePosition();
-% vol_raw = R.getVoltages();
-% pos(1,:) = pos_raw(2,:);
-% vol(1,:) = vol_raw';
+pos = zeros(N_ITER_MAX,3);
+vol = zeros(N_ITER_MAX,3);
+t = zeros(N_ITER_MAX,3);
 
-for i = 889:N_ITER_MAX
+R.Measure();
+pause(0.1)
+    
+pos_raw = R.CapturePosition();
+vol_raw = R.getVoltages();
+pos(1,:) = pos_raw(2,:);
+vol(1,:) = vol_raw';
+
+for i = 1:N_ITER_MAX
    
     while 1
 
-        t(i,:) = -30 + 30*randi(fix((MAX_MILLIS/30 + 1)), [1 3]);
+        t(i,:) = -50 + 50*randi(fix((MAX_MILLIS/50 + 1)), [1 3]);
     
         indice = find(t(i,:) == min(t(i,:)));
     
@@ -45,7 +44,7 @@ for i = 889:N_ITER_MAX
     vol(i,:) = vol_raw';
 
     if ~mod(i,SAVE)
-        save(strcat('DatasetNN/prueba_DEF_BUENA_',num2str(i/SAVE)),'pos','vol','t');
+        save(strcat('DatasetNN/prueba_',num2str(i/SAVE)),'pos','vol','t');
     end
     
     R.Deflate();
